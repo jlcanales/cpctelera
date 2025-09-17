@@ -47,10 +47,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 20150116 Richard Genoud (Paratronic): correct buffer overflows/wrong results with the -l flag
 20150122 JP: added support for different check methods
 20150221 JP: rewrite of the checksum write/force value
+20150804 JP: added batch file option
 */
 
 #define PROGRAM "mot2bin"
-#define VERSION "2.0"
+#define VERSION "2.5"
 
 #include "common.h"
 
@@ -67,152 +68,41 @@ int main (int argc, char *argv[])
     /* cmd-line parameter # */
     char *p;
 
-    int Param, result;
+    int result;
 
     /* Application specific */
-
-    unsigned int Nb_Bytes;
     unsigned int First_Word, Address;
-
-    unsigned int Phys_Addr, Type;
+    unsigned int Type;
     unsigned int Exec_Address;
     unsigned int temp;
     unsigned int Record_Count, Record_Checksum;
-    unsigned int Records_Start; // Lowest address of the records
-
-    unsigned int temp2;
 
     byte	Data_Str[MAX_LINE_SIZE];
 
-    fprintf (stdout,PROGRAM" v"VERSION", Copyright (C) 2015 Jacques Pelletier & contributors\n\n");
+    fprintf (stdout,PROGRAM" v"VERSION", Copyright (C) 2017 Jacques Pelletier & contributors\n\n");
 
     if (argc == 1)
         usage();
 
     strcpy(Extension, "bin"); /* default is for binary file extension */
 
-    /* read file */
-    Starting_Address = 0;
-
-    /*
-    use p for parsing arguments
-    use i for number of parameters to skip
-    use c for the current option
-    */
-    for (Param = 1; Param < argc; Param++)
-    {
-        int i = 0;
-        char c;
-
-        p = argv[Param];
-        c = *(p+1); /* Get option character */
-
-		if ( _IS_OPTION_(*p) )
-        {
-            // test for no space between option and parameter
-            if (strlen(p) != 2) usage();
-
-            switch(c)
-            {
-            /* file extension */
-            case 'c':
-                Enable_Checksum_Error = true;
-                i = 0;
-                break;
-            case 'd':
-                DisplayCheckMethods();
-            case 'e':
-                GetExtension(argv[Param + 1],Extension);
-                i = 1; /* add 1 to Param */
-                break;
-            case 'f':
-                Cks_Addr = GetHex(argv[Param + 1]);
-                Cks_Addr_set = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'F':
-                Cks_Addr = GetHex(argv[Param + 1]);
-                Cks_Value = GetHex(argv[Param + 2]);
-                Force_Value = true;
-                i = 2; /* add 2 to Param */
-                break;
-            case 'k':
-                Cks_Type = GetHex(argv[Param + 1]);
-                {
-                    if (Cks_Type > LAST_CHECK_METHOD) usage();
-                }
-                i = 1; /* add 1 to Param */
-                break;
-            case 'l':
-                Max_Length = GetHex(argv[Param + 1]);
-                Max_Length_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'm':
-                Minimum_Block_Size = GetHex(argv[Param + 1]);
-                Minimum_Block_Size_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'p':
-                Pad_Byte = GetHex(argv[Param + 1]);
-                i = 1; /* add 1 to Param */
-                break;
-            case 'r':
-                Cks_Start = GetHex(argv[Param + 1]);
-                Cks_End = GetHex(argv[Param + 2]);
-                Cks_range_set = true;
-                i = 2; /* add 2 to Param */
-                break;
-            case 's':
-                Starting_Address = GetHex(argv[Param + 1]);
-                Starting_Address_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'w':
-                Swap_Wordwise = true;
-                i = 0;
-                break;
-            case 'C':
-                Crc_Poly = GetHex(argv[Param + 1]);
-                Crc_Init = GetHex(argv[Param + 2]);
-                Crc_RefIn = GetBoolean(argv[Param + 3]);
-                Crc_RefOut = GetBoolean(argv[Param + 4]);
-                Crc_XorOut = GetHex(argv[Param + 5]);
-                CrcParamsCheck();
-                i = 5; /* add 5 to Param */
-                break;
-
-            case '?':
-            case 'h':
-            default:
-                usage();
-            } /* switch */
-
-            /* Last parameter is not a filename */
-            if (Param == argc-1) usage();
-
-            // fprintf(stderr,"Param: %d, option: %c\n",Param,c);
-
-            /* if (Param + i) < (argc -1) */
-            if (Param < argc -1 -i) Param += i;
-            else usage();
-
-        }
-        else
-            break;
-        /* if option */
-    } /* for Param */
+	ParseOptions(argc, argv);
 
     /* when user enters input file name */
 
     /* Assume last parameter is filename */
-    strcpy(Filename,argv[argc -1]);
+    GetFilename(Filename,argv[argc -1]);
 
     /* Just a normal file name */
     NoFailOpenInputFile (Filename);
     PutExtension(Filename, Extension);
     NoFailOpenOutputFile(Filename);
     Fileread = true;
+
+    /* When the hex file is opened, the program will read it in 2 passes.
+    The first pass gets the highest and lowest addresses so that we can allocate
+    the right size.
+    The second pass processes the hex data. */
 
     /* To begin, assume the lowest address is at the end of the memory.
      While reading each records, subsequent addresses will lower this number.
@@ -225,6 +115,7 @@ int main (int argc, char *argv[])
     Highest_Address = 0;
     Records_Start = 0;
     Record_Nb = 0;
+    First_Word = 0;
 
     /* get highest and lowest addresses so that we can allocate the right size */
     do
@@ -247,6 +138,7 @@ int main (int argc, char *argv[])
             switch(Line[1])
             {
             case '0':
+            	Nb_Bytes = 1; /* This is to fix the Highest_Address set to -1 when Nb_Bytes = 0 */
                 break;
 
             /* 16 bits address */
@@ -292,30 +184,8 @@ int main (int argc, char *argv[])
     }
     while (!feof (Filin));
 
-    if (Starting_Address_Setted == true)
-    {
-        Records_Start = Lowest_Address;
-        Lowest_Address = Starting_Address;
-    }
-    else
-    {
-        Records_Start = Lowest_Address;
-        Starting_Address = Lowest_Address;
-    }
+    Allocate_Memory_And_Rewind();
 
-    if (Max_Length_Setted == false)
-        Max_Length = Highest_Address - Lowest_Address + 1;
-    else
-        Highest_Address = Lowest_Address + Max_Length - 1;
-
-    /* Now, that we know the buffer size, we can allocate it. */
-    /* allocate a buffer */
-    Memory_Block = (byte *) NoFailMalloc(Max_Length);
-
-    /* For EPROM or FLASH memory types, fill unused bytes with FF or the value specified by the p option */
-    memset (Memory_Block,Pad_Byte,Max_Length);
-
-    rewind(Filin);
     Record_Nb = 0;
 
     /* Read the file & process the lines. */
@@ -428,30 +298,7 @@ int main (int argc, char *argv[])
 
                 Phys_Addr = Address;
 
-                /* Read the Data bytes. */
-                i = Nb_Bytes;
-
-                do
-                {
-                    result = sscanf (p, "%2x",&temp2);
-		            if (result != 1) fprintf(stderr,"Error in line %d of hex file\n", Record_Nb);
-                    p += 2;
-
-                    /* Overlapping record will erase the pad bytes */
-                    if (Swap_Wordwise)
-                    {
-                        if (Memory_Block[Phys_Addr ^ 1] != Pad_Byte) fprintf(stderr,"Overlapped record detected\n");
-                        Memory_Block[Phys_Addr++ ^ 1] = temp2;
-                    }
-                    else
-                    {
-                        if (Memory_Block[Phys_Addr] != Pad_Byte) fprintf(stderr,"Overlapped record detected\n");
-                        Memory_Block[Phys_Addr++] = temp2;
-                    }
-
-                    Checksum = (Checksum + temp2) & 0xFF;
-                }
-                while (--i != 0);
+				p = ReadDataBytes(p);
 
                 /* Read the Checksum value. */
                 result = sscanf (p, "%2x",&Record_Checksum);

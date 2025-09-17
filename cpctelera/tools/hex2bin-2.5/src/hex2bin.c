@@ -49,10 +49,13 @@
   20150116 Richard Genoud (Paratronic): correct buffer overflows/wrong results with the -l flag
   20150122 JP: added support for different check methods
   20150221 JP: rewrite of the checksum write/force value
+  20150804 JP: added batch file option
+  20160923 JP: added code for checking filename length
+  20170418 Simone Fratini: added option -t and -T to obtain shorter binary files
 */
 
 #define PROGRAM "hex2bin"
-#define VERSION "2.0"
+#define VERSION "2.5"
 
 #include "common.h"
 
@@ -73,15 +76,13 @@ int main (int argc, char *argv[])
     /* cmd-line parameter # */
     char *p;
 
-    int Param,result;
+    int result;
 
     /* Application specific */
-
-    unsigned int Nb_Bytes;
     unsigned int First_Word, Address, Segment, Upper_Address;
-    unsigned int Phys_Addr, Type;
+    unsigned int Type;
+    unsigned int Offset = 0x00;
     unsigned int temp;
-    unsigned int Records_Start; // Lowest address of the records
 
     /* We will assume that when one type of addressing is selected, it will be valid for all the
      current file. Records for the other type will be ignored. */
@@ -91,142 +92,30 @@ int main (int argc, char *argv[])
 
     byte	Data_Str[MAX_LINE_SIZE];
 
-    fprintf (stdout,PROGRAM" v"VERSION", Copyright (C) 2015 Jacques Pelletier & contributors\n\n");
+    fprintf (stdout,PROGRAM" v"VERSION", Copyright (C) 2017 Jacques Pelletier & contributors\n\n");
 
     if (argc == 1)
         usage();
 
     strcpy(Extension, "bin"); /* default is for binary file extension */
 
-    /* read file */
-    Starting_Address = 0;
-
-    /*
-    use p for parsing arguments
-    use i for number of parameters to skip
-    use c for the current option
-    */
-    for (Param = 1; Param < argc; Param++)
-    {
-        int i = 0;
-        char c;
-
-        p = argv[Param];
-        c = *(p+1); /* Get option character */
-
-		if ( _IS_OPTION_(*p) )
-        {
-            // test for no space between option and parameter
-            if (strlen(p) != 2) usage();
-
-            switch(c)
-            {
-            /* file extension */
-            case 'c':
-                Enable_Checksum_Error = true;
-                i = 0;
-                break;
-            case 'd':
-                DisplayCheckMethods();
-            case 'e':
-                GetExtension(argv[Param + 1],Extension);
-                i = 1; /* add 1 to Param */
-                break;
-            case 'E':
-                Endian = GetBin(argv[Param + 1]);
-                i = 1; /* add 1 to Param */
-                break;
-            case 'f':
-                Cks_Addr = GetHex(argv[Param + 1]);
-                Cks_Addr_set = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'F':
-                Cks_Addr = GetHex(argv[Param + 1]);
-                Cks_Value = GetHex(argv[Param + 2]);
-                Force_Value = true;
-                i = 2; /* add 2 to Param */
-                break;
-            case 'k':
-                Cks_Type = GetHex(argv[Param + 1]);
-                {
-                    if (Cks_Type > LAST_CHECK_METHOD) usage();
-                }
-                i = 1; /* add 1 to Param */
-                break;
-            case 'l':
-                Max_Length = GetHex(argv[Param + 1]);
-				if (Max_Length > 0x800000)
-				{
-					fprintf(stderr,"Max_Length = %u\n", Max_Length);
-					exit(1);
-				}
-                Max_Length_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'm':
-                Minimum_Block_Size = GetHex(argv[Param + 1]);
-                Minimum_Block_Size_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'p':
-                Pad_Byte = GetHex(argv[Param + 1]);
-                i = 1; /* add 1 to Param */
-                break;
-            case 'r':
-                Cks_Start = GetHex(argv[Param + 1]);
-                Cks_End = GetHex(argv[Param + 2]);
-                Cks_range_set = true;
-                i = 2; /* add 2 to Param */
-                break;
-            case 's':
-                Starting_Address = GetHex(argv[Param + 1]);
-                Starting_Address_Setted = true;
-                i = 1; /* add 1 to Param */
-                break;
-            case 'w':
-                Swap_Wordwise = true;
-                i = 0;
-                break;
-            case 'C':
-                Crc_Poly = GetHex(argv[Param + 1]);
-                Crc_Init = GetHex(argv[Param + 2]);
-                Crc_RefIn = GetBoolean(argv[Param + 3]);
-                Crc_RefOut = GetBoolean(argv[Param + 4]);
-                Crc_XorOut = GetHex(argv[Param + 5]);
-                CrcParamsCheck();
-                i = 5; /* add 5 to Param */
-                break;
-
-            case '?':
-            case 'h':
-            default:
-                usage();
-            } /* switch */
-
-            /* Last parameter is not a filename */
-            if (Param == argc-1) usage();
-
-            /* if (Param + i) < (argc -1) */
-            if (Param < argc -1 -i) Param += i;
-            else usage();
-
-        }
-        else
-            break;
-        /* if option */
-    } /* for Param */
+	ParseOptions(argc, argv);
 
     /* when user enters input file name */
 
     /* Assume last parameter is filename */
-    strcpy(Filename,argv[argc -1]);
+    GetFilename(Filename,argv[argc -1]);
 
     /* Just a normal file name */
     NoFailOpenInputFile (Filename);
     PutExtension(Filename, Extension);
     NoFailOpenOutputFile(Filename);
     Fileread = true;
+
+    /* When the hex file is opened, the program will read it in 2 passes.
+    The first pass gets the highest and lowest addresses so that we can allocate
+    the right size.
+    The second pass processes the hex data. */
 
     /* To begin, assume the lowest address is at the end of the memory.
      While reading each records, subsequent addresses will lower this number.
@@ -241,8 +130,12 @@ int main (int argc, char *argv[])
     Segment = 0;
     Upper_Address = 0;
     Record_Nb = 0;    // Used for reporting errors
+    First_Word = 0;
 
-    /* get highest and lowest addresses so that we can allocate the right size */
+    /* Check if are set Floor and Ceiling Address and range is coherent*/
+    VerifyRangeFloorCeil();
+
+    /* get highest and lowest addresses so that we can allocate the rintervallo incoerenteight size */
     do
     {
         unsigned int i;
@@ -289,6 +182,17 @@ int main (int argc, char *argv[])
                     Phys_Addr = ((Upper_Address << 16) + Address);
                 }
 
+                if (Verbose_Flag) fprintf(stderr,"Physical Address: %08X\n",Phys_Addr);
+
+                /* Floor address */
+                if (Floor_Address_Setted)
+                {
+                    /* Discard if lower than Floor_Address */
+                  if (Phys_Addr < (Floor_Address - Starting_Address)) {
+                    if (Verbose_Flag) fprintf(stderr,"Discard physical address less than %08X\n",Floor_Address - Starting_Address);
+                    break; 
+                  }
+                }
                 /* Set the lowest address as base pointer. */
                 if (Phys_Addr < Lowest_Address)
                     Lowest_Address = Phys_Addr;
@@ -296,9 +200,23 @@ int main (int argc, char *argv[])
                 /* Same for the top address. */
                 temp = Phys_Addr + Nb_Bytes -1;
 
+                /*Ceiling address */
+                if (Ceiling_Address_Setted)
+                {
+                    /* Discard if higher than Ceiling_Address */
+                    if (temp  > (Ceiling_Address +  Starting_Address)) {
+                      if (Verbose_Flag) fprintf(stderr,"Discard physical address more than %08X\n",Ceiling_Address + Starting_Address);
+                      break;
+                    }
+                }
                 if (temp > Highest_Address)
                     Highest_Address = temp;
+                if (Verbose_Flag) fprintf(stderr,"Highest_Address: %08X\n",Highest_Address);
+                break;
 
+
+            case 1:
+                if (Verbose_Flag) fprintf(stderr,"End of File record\n");
                 break;
 
             case 2:
@@ -315,6 +233,8 @@ int main (int argc, char *argv[])
                     result = sscanf (p, "%4x%2x",&Segment,&temp2);
 					if (result != 2) fprintf(stderr,"Error in line %d of hex file\n", Record_Nb);
 
+                    if (Verbose_Flag) fprintf(stderr,"Extended Segment Address record: %04X\n",Segment);
+
                     /* Update the current address. */
                     Phys_Addr = (Segment << 4);
                 }
@@ -322,6 +242,10 @@ int main (int argc, char *argv[])
                 {
                     fprintf(stderr,"Ignored extended linear address record %d\n", Record_Nb);
                 }
+                break;
+
+            case 3:
+                if (Verbose_Flag) fprintf(stderr,"Start Segment Address record: ignored\n");
                 break;
 
             case 4:
@@ -338,8 +262,12 @@ int main (int argc, char *argv[])
                     result = sscanf (p, "%4x%2x",&Upper_Address,&temp2);
 					if (result != 2) fprintf(stderr,"Error in line %d of hex file\n", Record_Nb);
 
+                    if (Verbose_Flag) fprintf(stderr,"Extended Linear Address record: %04X\n",Upper_Address);
+
                     /* Update the current address. */
                     Phys_Addr = (Upper_Address << 16);
+
+                    if (Verbose_Flag) fprintf(stderr,"Physical Address: %08X\n",Phys_Addr);
                 }
                 else
                 {
@@ -347,40 +275,26 @@ int main (int argc, char *argv[])
                 }
                 break;
 
+            case 5:
+                if (Verbose_Flag) fprintf(stderr,"Start Linear Address record: ignored\n");
+                break;
+
             default:
+                if (Verbose_Flag) fprintf(stderr,"Unknown record type: %d at %d\n",Type,Record_Nb);
                 break;
             }
         }
     }
     while (!feof (Filin));
 
-    rewind(Filin);
+    if (Address_Alignment_Word)
+        Highest_Address += (Highest_Address - Lowest_Address) + 1;
+
+    Allocate_Memory_And_Rewind();
+
     Segment = 0;
     Upper_Address = 0;
     Record_Nb = 0;
-
-    if (Starting_Address_Setted == true)
-    {
-        Records_Start = Lowest_Address;
-        Lowest_Address = Starting_Address;
-    }
-    else
-    {
-        Records_Start = Lowest_Address;
-        Starting_Address = Lowest_Address;
-    }
-
-    if (Max_Length_Setted == false)
-        Max_Length = Highest_Address - Lowest_Address + 1;
-    else
-        Highest_Address = Lowest_Address + Max_Length - 1;
-
-    /* Now, that we know the buffer size, we can allocate it. */
-    /* allocate a buffer */
-    Memory_Block = (byte *) NoFailMalloc(Max_Length);
-
-    /* For EPROM or FLASH memory types, fill unused bytes with FF or the value specified by the p option */
-    memset (Memory_Block,Pad_Byte,Max_Length);
 
     /* Read the file & process the lines. */
     do /* repeat until EOF(Filin) */
@@ -430,7 +344,10 @@ int main (int argc, char *argv[])
                     /* LINEAR_ADDRESS or NO_ADDRESS_TYPE_SELECTED
                        Upper_Address = 0 as specified in the Intel spec. until an extended address
                        record is read. */
-                    Phys_Addr = ((Upper_Address << 16) + Address);
+                    if (Address_Alignment_Word)
+                        Phys_Addr = ((Upper_Address << 16) + (Address << 1)) + Offset;
+                    else
+                        Phys_Addr = ((Upper_Address << 16) + Address);
 
                 /* Check that the physical address stays in the buffer's range. */
                 if ((Phys_Addr >= Lowest_Address) && (Phys_Addr <= Highest_Address))
@@ -438,35 +355,7 @@ int main (int argc, char *argv[])
                     /* The memory block begins at Lowest_Address */
                     Phys_Addr -= Lowest_Address;
 
-                    /* Read the Data bytes. */
-                    /* Bytes are written in the Memory block even if checksum is wrong. */
-                    i = Nb_Bytes;
-
-                    do
-                    {
-                        result = sscanf (p, "%2x",&temp2);
-                        if (result != 1) fprintf(stderr,"Error in line %d of hex file\n", Record_Nb);
-                        p += 2;
-
-                        /* Check that the physical address stays in the buffer's range. */
-                        if (Phys_Addr < Max_Length)
-                        {
-                            /* Overlapping record will erase the pad bytes */
-                            if (Swap_Wordwise)
-                            {
-                                if (Memory_Block[Phys_Addr ^ 1] != Pad_Byte) fprintf(stderr,"Overlapped record detected\n");
-                                Memory_Block[Phys_Addr++ ^ 1] = temp2;
-                            }
-                            else
-                            {
-                                if (Memory_Block[Phys_Addr] != Pad_Byte) fprintf(stderr,"Overlapped record detected\n");
-                                Memory_Block[Phys_Addr++] = temp2;
-                            }
-
-                            Checksum = (Checksum + temp2) & 0xFF;
-                        }
-                    }
-                    while (--i != 0);
+					p = ReadDataBytes(p);
 
                     /* Read the Checksum value. */
                     result = sscanf (p, "%2x",&temp2);
@@ -526,6 +415,13 @@ int main (int argc, char *argv[])
                 /* First_Word contains the offset. It's supposed to be 0000 so
                    we ignore it. */
 
+                if (Address_Alignment_Word)
+                {
+                    sscanf (p, "%4x",&Offset);
+                    Offset = Offset << 16;
+                    Offset -= Lowest_Address;
+
+                }
                 /* First extended linear address record ? */
                 if (Seg_Lin_Select == NO_ADDRESS_TYPE_SELECTED)
                     Seg_Lin_Select = LINEAR_ADDRESS;

@@ -10,10 +10,10 @@ necessary in order of address.
 
 How does it work?
 
-Hex2bin/mot2bin allocates a 4 MBytes buffer and just place the converted bytes
-in its buffer. At the end, the buffer is written to disk. Using a buffer elimi-
-nates the need to sort records.  If the option l is used (3), the buffer will be
-allocated with the maximum size specified if over 4Mbytes.
+Hex2bin/mot2bin allocates a buffer and just place the converted bytes in its buffer.
+At the end, the buffer is written to disk. Using a buffer eliminates the need to
+sort records. Hex2bin and mot2bin will calculate the needed buffer size directly
+from the hex file.
 
 Before reading the hex file, the buffer is filled with a default value. These
 padding bytes are all FF by default so an EPROM programmer can skip these bytes
@@ -30,6 +30,8 @@ when programming. The padding value can be changed with the -p option.
 	This will install the program to /usr/local/bin.
 
 1a. Compiling for Windows on Msys, Cygwin or DOS prompt
+
+	Versions already compiled for Windows are in bin/Release
 
 	The programs can be compiled as follows:
 	  gcc -O2 -Wall -o hex2bin.exe hex2bin.c common.c libcrc.c binary.c
@@ -153,14 +155,8 @@ when programming. The padding value can be changed with the -p option.
 	Motorola files.
 
 	This program will handle S19 files generated for Motorola micropro-
-	cessors. Since I use this program for an EPROM programmer, I will
-	rarely need to have more than 4M, I limited the source program for
-	24 bits or 16 bits address records.
-
-	32 bits records are now supported, but obviously I can't allocate all
-	the memory for the binary target. What I did is simply assume that the
-	binary file will occupy less than 4M. For binary files greater than 4M,
-	see length option (section 3).
+	cessors. 32, 24 bits or 16 bits address records are supported up to
+	the memory available.
 
 8. Support for byte-swapped hex/S19 files
 
@@ -170,7 +166,14 @@ when programming. The padding value can be changed with the -p option.
 
 	hex2bin -w test-byte-swap.hex
 
-9. Goodies
+9. Batch file/script mode
+
+    Hex2bin won't ask for replacement files if the one specified is not found.
+    This is convenient in batch files, Makefiles or scripts.
+
+    hex2bin -b test.hex
+
+10. Goodies
 
 	Description of the file formats is included.
 	Added examples files for extended addressing.
@@ -181,8 +184,7 @@ when programming. The padding value can be changed with the -p option.
 	This will not detect the case when the previous value equals the pad byte,
 	but it's more likely that more than one byte will be overlapped.
 
-
-10. Error messages
+11. Error messages
 
     "Can't allocate memory."
 
@@ -214,12 +216,11 @@ when programming. The padding value can be changed with the -p option.
 	"Some error occurred when parsing options."
 
 
-
-11. History
+12. History
 
         See ChangeLog
 
-12. Other hex tool
+13. Other hex tool
 
 	There is a program that supports more formats and has more features.
 	See SRecord at http://srecord.sourceforge.net/

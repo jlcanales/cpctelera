@@ -12,6 +12,11 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
+//#if defined(_WIN32) || defined(_WIN64)
+//#include <windows.h>
+//#endif /* _WIN32 */
+
+/* option character */
 #if defined(MSDOS) || defined(__DOS__) || defined(__MSDOS__) || defined(_MSDOS)
 #define _IS_OPTION_(x)	 (((x) == '-') || ((x) == '/'))
 #else
@@ -26,7 +31,7 @@
 #endif
 
 /* FIXME how to get it from the system/OS? */
-#define MAX_FILE_NAME_SIZE 81
+#define MAX_FILE_NAME_SIZE 260
 
 #ifdef DOS
 #define MAX_EXTENSION_SIZE 4
@@ -41,7 +46,7 @@ typedef char filetype[MAX_FILE_NAME_SIZE];
 typedef unsigned char byte;
 typedef unsigned short word;
 
-#define LAST_CHECK_METHOD 4
+#define LAST_CHECK_METHOD 5
 
 typedef enum Crc
 {
@@ -49,7 +54,8 @@ typedef enum Crc
     CHK16,
     CRC8,
     CRC16,
-    CRC32
+    CRC32,
+    CHK16_8
 } t_CRC;
 
 extern const char *Pgm_Name;
@@ -64,53 +70,69 @@ int GetBin(const char *str);
 int GetDec(const char *str);
 int GetHex(const char *str);
 bool GetBoolean(const char *str);
+void GetFilename(char *dest,char *src);
 void GetExtension(const char *str,char *ext);
 void PutExtension(char *Flnm, char *Extension);
 
-filetype    Filename;           /* string for opening files */
-char        Extension[MAX_EXTENSION_SIZE];       /* filename extension for output files */
+#ifndef __COMMON_C__
+extern filetype    Filename;           /* string for opening files */
+extern char        Extension[MAX_EXTENSION_SIZE];       /* filename extension for output files */
 
-FILE        *Filin,             /* input files */
+extern FILE        *Filin,             /* input files */
             *Filout;            /* output files */
 
 #ifdef USE_FILE_BUFFERS
-char		*FilinBuf,          /* text buffer for file input */
+extern char		*FilinBuf,          /* text buffer for file input */
             *FiloutBuf;         /* text buffer for file output */
 #endif
 
-int Pad_Byte;
-bool Enable_Checksum_Error;
-bool Status_Checksum_Error;
-byte 	Checksum;
-unsigned int Record_Nb;
+extern int Pad_Byte;
+extern bool Enable_Checksum_Error;
+extern bool Status_Checksum_Error;
+extern byte 	Checksum;
+extern unsigned int Record_Nb;
+extern unsigned int Nb_Bytes;
 
 /* This will hold binary codes translated from hex file. */
-byte *Memory_Block;
-unsigned int Lowest_Address, Highest_Address;
-unsigned int Starting_Address;
-unsigned int Max_Length;
-unsigned int Minimum_Block_Size;
-int Module;
-bool Minimum_Block_Size_Setted;
-bool Starting_Address_Setted;
-bool Max_Length_Setted;
-bool Swap_Wordwise;
+extern byte *Memory_Block;
+extern unsigned int Lowest_Address, Highest_Address;
+extern unsigned int Starting_Address, Phys_Addr;
+extern unsigned int Records_Start; // Lowest address of the records
+extern unsigned int Max_Length;
+extern unsigned int Minimum_Block_Size;
+extern unsigned int Ceiling_Address;
+extern unsigned int Floor_Address;
+extern int Module;
+extern bool Minimum_Block_Size_Setted;
+extern bool Starting_Address_Setted;
+extern bool Floor_Address_Setted;
+extern bool Ceiling_Address_Setted;
+extern bool Max_Length_Setted;
+extern bool Swap_Wordwise;
+extern bool Address_Alignment_Word;
+extern bool Batch_Mode;
+extern bool Verbose_Flag;
 
-int Endian;
+extern int Endian;
 
-t_CRC Cks_Type;
-unsigned int Cks_Start, Cks_End, Cks_Addr, Cks_Value;
-bool Cks_range_set;
-bool Cks_Addr_set;
-bool Force_Value;
+extern t_CRC Cks_Type;
+extern unsigned int Cks_Start, Cks_End, Cks_Addr, Cks_Value;
+extern bool Cks_range_set;
+extern bool Cks_Addr_set;
+extern bool Force_Value;
 
-unsigned int Crc_Poly, Crc_Init, Crc_XorOut;
-bool Crc_RefIn;
-bool Crc_RefOut;
+extern unsigned int Crc_Poly, Crc_Init, Crc_XorOut;
+extern bool Crc_RefIn;
+extern bool Crc_RefOut;
+#endif
 
 void VerifyChecksumValue(void);
+void VerifyRangeFloorCeil(void);
 void CrcParamsCheck(void);
 void WriteMemBlock16(uint16_t Value);
 void WriteMemBlock32(uint32_t Value);
 void WriteMemory(void);
+void Allocate_Memory_And_Rewind(void);
+char *ReadDataBytes(char *p);
+void ParseOptions(int argc, char *argv[]);
 
