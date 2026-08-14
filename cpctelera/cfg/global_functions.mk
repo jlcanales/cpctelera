@@ -188,7 +188,7 @@ endef
 #
 define COMPILECFILE
 $(1): $(2)
-	$(Z80CC) $(Z80CCINCLUDE) -mz80 $(Z80CCFLAGS) -c $(2) -o $(1)
+	$(Z80CC) $(Z80CCINCLUDE) -mz80 $(Z80CCFLAGS) --sdcccall 0 -c $(2) -o $(1)
 endef
 
 #################

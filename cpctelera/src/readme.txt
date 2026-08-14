@@ -38,7 +38,7 @@ Section: Welcome to CPCtelera!
      * Generate custom-quality random number sequences
 
    However, CPCtelera is much more than a low-level library. CPCtelera comes with a complete build system for easing your project creation and management. CPCtelera offers you:
-     * Integrated set of compiling and generation tools (SDCC 3.5.5, iDSK 0.13, Hex2Bin 2.0, 2cdt)
+     * Integrated set of compiling and generation tools (SDCC 4.5.0, iDSK 0.13, Hex2Bin 2.5, 2cdt)
      * Easy and automated project creation and management
      * Automatic generation of CDT and DSK files
      * Program completely in C, completely in Assembler or mix both languages at will. You won't even have to touch a line of the build system!
